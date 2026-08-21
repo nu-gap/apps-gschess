@@ -10,7 +10,7 @@ mac:
 	cp Resources/Info.plist build/$(APP).app/Contents/Info.plist
 
 gnustep:
-	$(MAKE) -f Makefile.gnustep
+	$(MAKE) -f Makefile.gnustep MAKEFILE_NAME=Makefile.gnustep
 
 test:
 	mkdir -p build
