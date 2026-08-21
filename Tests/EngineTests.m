@@ -31,6 +31,8 @@ main (void)
   ChessGame *g = [[ChessGame alloc] init];
   require ([[g legalMoves] count] == 20,
            @"initial position has 20 legal moves");
+  [g reset];
+  require (![g blackToMove], @"White always moves first after reset");
   require ([g makeMove:move (g, 12, 28)], @"e2-e4 is legal");
   require ([g blackToMove], @"turn changes after a move");
   require ([g makeMove:move (g, 52, 36)], @"e7-e5 is legal");
@@ -45,6 +47,23 @@ main (void)
   GCMove ai = [g bestMoveAtDepth:2];
   require (ai.from >= 0 && ai.to >= 0, @"AI returns a legal move");
   require ([g makeMove:ai], @"AI move can be applied");
+
+  [g reset];
+  GCMove varied = [g variedOpeningMoveAtDepth:2];
+  require (varied.from >= 0 && varied.to >= 0 && [g makeMove:varied],
+           @"varied opening selection returns a legal move");
+
+  [g reset];
+  for (int cycle = 0; cycle < 4; cycle++)
+    {
+      require ([g makeMove:move (g, 6, 21)], @"g1-f3 repetition move");
+      require ([g makeMove:move (g, 62, 45)], @"g8-f6 repetition move");
+      require ([g makeMove:move (g, 21, 6)], @"f3-g1 repetition move");
+      require ([g makeMove:move (g, 45, 62)], @"f6-g8 repetition move");
+    }
+  require ([g gameOver] &&
+               [[g status] isEqualToString:@"Draw — fivefold repetition"],
+           @"fifth occurrence automatically declares a draw");
   NSLog (@"PASS: rules, undo, notation, and AI smoke tests");
   [g release];
   [pool drain];

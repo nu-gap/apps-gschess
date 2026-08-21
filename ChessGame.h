@@ -55,6 +55,7 @@ GCMoveFromValue (NSValue *v)
   GCPosition _p;
   NSMutableArray *_undo;
   NSMutableArray *_mutableHistory;
+  NSMutableArray *_positionKeys;
 }
 /** Returns whether Black is the side to move. */
 - (BOOL)blackToMove;
@@ -78,6 +79,8 @@ GCMoveFromValue (NSValue *v)
 - (void)reset;
 /** Searches using depth-limited negamax with alpha-beta pruning. */
 - (GCMove)bestMoveAtDepth:(NSInteger)depth;
+/** Selects a varied near-best move during the opening, then searches normally. */
+- (GCMove)variedOpeningMoveAtDepth:(NSInteger)depth;
 /** Returns a PGN record containing moves, result, and current FEN. */
 - (NSString *)PGNString;
 @end

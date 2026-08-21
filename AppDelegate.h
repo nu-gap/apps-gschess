@@ -9,7 +9,11 @@
   NSTextView *_history;
   NSButton *_computer;
   NSMenuItem *_computerMenu;
+  NSButton *_selfPlayButton;
+  NSMenuItem *_selfPlayMenu;
   NSPanel *_infoPanel;
   BOOL _thinking;
+  BOOL _playerBlack;
+  BOOL _varyComputerMove;
 }
 @end

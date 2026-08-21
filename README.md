@@ -54,6 +54,13 @@ rook is captured on its home square.  The en-passant field contains the capturab
 destination square for one ply.  A four-field snapshot (board, rights, en-passant,
 side-to-move) is pushed before every real move, giving exact undo.
 
+Position history follows FIDE Laws of Chess Articles 9.2 and 9.6.1. Position
+identity includes piece placement, side to move, castling rights, and en-passant
+only when a legal en-passant capture exists. A third occurrence permits a player
+to claim a draw under FIDE rules; the fifth occurrence ends the game automatically.
+The application enforces the automatic fivefold rule, including during computer
+self-play, so repeating engines cannot continue indefinitely.
+
 The computer uses depth-limited **negamax with alpha-beta pruning**.  Negamax is
 minimax written using the identity `score(position, side) = -score(position,
 opponent)`, so only one maximizing routine is necessary.  Alpha and beta track the
@@ -68,13 +75,22 @@ delays unavoidable ones.  The default depth is 3: intentionally modest so it sta
 responsive on GNUstep as well as macOS.  Search runs on a background thread; UI
 updates return to the main thread.
 
+During computer self-play, the first twelve plies are selected from up to four
+near-best candidates within half a pawn of the engine's top choice.  This adds
+opening variety without deliberately choosing weak moves.  Player-versus-computer
+games continue to use the single best move.  Self-play also pauses briefly after
+each move so the resulting position can be observed before the next search.
+
 ## Controls
 
 - Click a piece, then a highlighted destination.
-- **New Game** resets the standard position.
+- **New: Play White** resets the standard position with the player as White.
+- **New: Play Black** resets the standard position with the player as Black;
+  White still moves first, so the computer makes the opening move.
 - **Save Game…** writes a PGN record containing the moves, result, and current FEN.
 - **Undo** takes back the latest pair of moves when playing the computer.
-- **Play Computer** toggles the AI (Black by default).
+- **Play Computer** toggles the AI (the opposite of the selected player color).
+- **Computer vs Computer** continuously lets the AI play both colors.
 - **Flip Board** changes the viewing orientation.
 - Pawn promotion automatically chooses a queen.
 

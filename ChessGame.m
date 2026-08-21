@@ -53,6 +53,7 @@ compareMoves (id left, id right, void *context)
     {
       _undo = [[NSMutableArray alloc] init];
       _mutableHistory = [[NSMutableArray alloc] init];
+      _positionKeys = [[NSMutableArray alloc] init];
       [self reset];
     }
   return self;
@@ -61,6 +62,7 @@ compareMoves (id left, id right, void *context)
 {
   [_undo release];
   [_mutableHistory release];
+  [_positionKeys release];
   [super dealloc];
 }
 - (id)copyWithZone:(NSZone *)zone
@@ -69,8 +71,10 @@ compareMoves (id left, id right, void *context)
   g->_p = _p;
   [g->_undo release];
   [g->_mutableHistory release];
+  [g->_positionKeys release];
   g->_undo = [_undo mutableCopy];
   g->_mutableHistory = [_mutableHistory mutableCopy];
+  g->_positionKeys = [_positionKeys mutableCopy];
   return g;
 }
 - (BOOL)blackToMove
@@ -91,6 +95,7 @@ compareMoves (id left, id right, void *context)
   memset (&_p, 0, sizeof (_p));
   _p.ep = -1;
   _p.rights = 15;
+  _p.black = NO;
   int back[8] = { GCRook, GCKnight, GCBishop, GCQueen,
                   GCKing, GCBishop, GCKnight, GCRook };
   for (int f = 0; f < 8; f++)
@@ -102,6 +107,8 @@ compareMoves (id left, id right, void *context)
     }
   [_undo removeAllObjects];
   [_mutableHistory removeAllObjects];
+  [_positionKeys removeAllObjects];
+  [_positionKeys addObject:[self positionKeyForPosition:&_p]];
 }
 
 /* Attack detection is separate from move generation: pawn attacks differ from
@@ -315,6 +322,44 @@ add (NSMutableArray *a, int from, int to, int promo, int flags)
     }
   return legal;
 }
+- (NSData *)positionKeyForPosition:(GCPosition *)p
+{
+  NSMutableData *key;
+  int8_t effectiveEnPassant = -1;
+  NSEnumerator *enumerator;
+  NSValue *value;
+
+  /* FIDE 9.2 compares possible moves as well as piece placement.  An
+     en-passant square therefore matters only when a legal en-passant capture
+     actually exists.  Castling rights always remain part of the key. */
+  if (p->ep >= 0)
+    {
+      enumerator = [[self legalMovesFor:p] objectEnumerator];
+      while ((value = [enumerator nextObject]))
+        if (GCMoveFromValue (value).flags & GCEnPassant)
+          {
+            effectiveEnPassant = p->ep;
+            break;
+          }
+    }
+  key = [NSMutableData dataWithCapacity:67];
+  [key appendBytes:p->board length:64];
+  [key appendBytes:&p->rights length:1];
+  [key appendBytes:&effectiveEnPassant length:1];
+  [key appendBytes:&p->black length:1];
+  return key;
+}
+- (NSUInteger)currentPositionRepetitionCount
+{
+  NSData *current = [self positionKeyForPosition:&_p];
+  NSEnumerator *enumerator = [_positionKeys objectEnumerator];
+  NSData *key;
+  NSUInteger count = 0;
+  while ((key = [enumerator nextObject]))
+    if ([key isEqual:current])
+      count++;
+  return count;
+}
 - (NSArray *)legalMoves
 {
   GCPosition p = _p;
@@ -377,6 +422,7 @@ squareName (int s)
   else if ([self inCheck:_p.black position:&_p])
     n = [n stringByAppendingString:@"+"];
   [_mutableHistory addObject:n];
+  [_positionKeys addObject:[self positionKeyForPosition:&_p]];
   return YES;
 }
 - (void)undo
@@ -387,13 +433,18 @@ squareName (int s)
   [_undo removeLastObject];
   if ([_mutableHistory count])
     [_mutableHistory removeLastObject];
+  if ([_positionKeys count] > 1)
+    [_positionKeys removeLastObject];
 }
 - (BOOL)gameOver
 {
-  return [[self legalMoves] count] == 0;
+  return [[self legalMoves] count] == 0 ||
+         [self currentPositionRepetitionCount] >= 5;
 }
 - (NSString *)status
 {
+  if ([self currentPositionRepetitionCount] >= 5)
+    return @"Draw — fivefold repetition";
   if (![self gameOver])
     return [NSString
         stringWithFormat:@"%@ to move%@", _p.black ? @"Black" : @"White",
@@ -551,5 +602,43 @@ squareName (int s)
         }
     }
   return best;
+}
+- (GCMove)variedOpeningMoveAtDepth:(NSInteger)depth
+{
+  if ([_mutableHistory count] >= 12)
+    return [self bestMoveAtDepth:depth];
+
+  int bestScore = INT_MIN + 1;
+  NSMutableArray *moves = [NSMutableArray array];
+  NSMutableArray *scores = [NSMutableArray array];
+  NSEnumerator *enumerator = [[self legalMoves] objectEnumerator];
+  NSValue *value;
+  while ((value = [enumerator nextObject]))
+    {
+      GCMove move = GCMoveFromValue (value);
+      GCPosition position = _p;
+      [self apply:move to:&position];
+      int score = -[self search:&position
+                          depth:(int)MAX (0, depth - 1)
+                          alpha:-1000000
+                           beta:1000000
+                            ply:1];
+      [moves addObject:value];
+      [scores addObject:[NSNumber numberWithInt:score]];
+      if (score > bestScore)
+        bestScore = score;
+    }
+
+  /* Vary among a few credible moves rather than sacrificing playing strength. */
+  NSMutableArray *candidates = [NSMutableArray arrayWithCapacity:4];
+  for (NSUInteger i = 0; i < [moves count] && [candidates count] < 4; i++)
+    if ([[scores objectAtIndex:i] intValue] >= bestScore - 50)
+      [candidates addObject:[moves objectAtIndex:i]];
+  if (![candidates count])
+    return [self bestMoveAtDepth:depth];
+
+  NSTimeInterval now = [[NSDate date] timeIntervalSinceReferenceDate];
+  NSUInteger choice = (NSUInteger)(now * 1000000.0) % [candidates count];
+  return GCMoveFromValue ([candidates objectAtIndex:choice]);
 }
 @end

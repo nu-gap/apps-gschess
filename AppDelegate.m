@@ -63,9 +63,12 @@
                                              keyEquivalent:@""];
   [bar addItem:gameRoot];
   NSMenu *game = [[NSMenu alloc] initWithTitle:@"Game"];
-  [game addItem:[self menuItem:@"New Game"
+  [game addItem:[self menuItem:@"New Game — Play White"
                         action:@selector (newGame:)
                            key:@"n"]];
+  [game addItem:[self menuItem:@"New Game — Play Black"
+                        action:@selector (newGameBlack:)
+                           key:@"b"]];
   [game addItem:[self menuItem:@"Save Game…"
                         action:@selector (saveGame:)
                            key:@"s"]];
@@ -78,6 +81,11 @@
                               key:@"k"] retain];
   [_computerMenu setState:GC_ON_STATE];
   [game addItem:_computerMenu];
+  _selfPlayMenu = [[self menuItem:@"Computer vs Computer"
+                           action:@selector (toggleSelfPlay:)
+                              key:@"d"] retain];
+  [_selfPlayMenu setState:GC_OFF_STATE];
+  [game addItem:_selfPlayMenu];
   [gameRoot setSubmenu:game];
   NSMenuItem *viewRoot = [[NSMenuItem alloc] initWithTitle:@"View"
                                                     action:NULL
@@ -125,18 +133,21 @@
   [c addSubview:_status];
   CGFloat x = 630;
   NSArray *buttons =
-      [NSArray arrayWithObjects:[self button:@"New Game"
+      [NSArray arrayWithObjects:[self button:@"New: Play White"
                                       action:@selector (newGame:)
                                        frame:NSMakeRect (x, 590, 190, 32)],
+                                [self button:@"New: Play Black"
+                                      action:@selector (newGameBlack:)
+                                       frame:NSMakeRect (x, 550, 190, 32)],
                                 [self button:@"Save Game…"
                                       action:@selector (saveGame:)
-                                       frame:NSMakeRect (x, 550, 190, 32)],
+                                       frame:NSMakeRect (x, 510, 190, 32)],
                                 [self button:@"Undo"
                                       action:@selector (undo:)
-                                       frame:NSMakeRect (x, 510, 190, 32)],
+                                       frame:NSMakeRect (x, 470, 190, 32)],
                                 [self button:@"Flip Board"
                                       action:@selector (flip:)
-                                       frame:NSMakeRect (x, 470, 190, 32)],
+                                       frame:NSMakeRect (x, 430, 190, 32)],
                                 nil];
   NSEnumerator *be = [buttons objectEnumerator];
   NSButton *b;
@@ -147,12 +158,18 @@
     }
   _computer = [[self button:@"Play Computer: On"
                      action:@selector (toggleComputer:)
-                      frame:NSMakeRect (x, 430, 190, 32)] retain];
+                      frame:NSMakeRect (x, 390, 190, 32)] retain];
   [_computer setState:GC_ON_STATE];
   [_computer setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [c addSubview:_computer];
+  _selfPlayButton = [[self button:@"Computer vs Computer: Off"
+                           action:@selector (toggleSelfPlay:)
+                            frame:NSMakeRect (x, 350, 190, 32)] retain];
+  [_selfPlayButton setState:GC_OFF_STATE];
+  [_selfPlayButton setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [c addSubview:_selfPlayButton];
   NSScrollView *scroll = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect (x, 55, 190, 355)] autorelease];
+      initWithFrame:NSMakeRect (x, 55, 190, 275)] autorelease];
   [scroll setHasVerticalScroller:YES];
   [scroll setAutoresizingMask:NSViewMinXMargin | NSViewHeightSizable];
   _history = [[NSTextView alloc] initWithFrame:[scroll bounds]];
@@ -190,7 +207,9 @@
 - (void)boardView:(ChessBoardView *)v requestedMove:(GCMove)m
 {
   (void)v;
-  if (_thinking || ([_computer state] == GC_ON_STATE && [_game blackToMove]))
+  if (_thinking || [_selfPlayButton state] == GC_ON_STATE
+      || ([_computer state] == GC_ON_STATE
+          && [_game blackToMove] != _playerBlack))
     return;
   if ([_game makeMove:m])
     {
@@ -200,20 +219,27 @@
 }
 - (void)maybeComputer
 {
-  if ([_computer state] != GC_ON_STATE || ![_game blackToMove] ||
-      [_game gameOver])
+  BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
+  if ((!selfPlay
+       && ([_computer state] != GC_ON_STATE
+           || [_game blackToMove] == _playerBlack))
+      || [_game gameOver] || _thinking)
     return;
   _thinking = YES;
+  _varyComputerMove = selfPlay;
   [self refresh];
   ChessGame *snapshot = [_game copy];
   [NSThread detachNewThreadSelector:@selector (searchThread:)
                            toTarget:self
                          withObject:snapshot];
+  [snapshot release];
 }
 - (void)searchThread:(ChessGame *)snapshot
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  GCMove m = [snapshot bestMoveAtDepth:3];
+  GCMove m = _varyComputerMove
+                 ? [snapshot variedOpeningMoveAtDepth:3]
+                 : [snapshot bestMoveAtDepth:3];
   [self performSelectorOnMainThread:@selector (finishComputer:)
                          withObject:GCMoveValue (m)
                       waitUntilDone:NO];
@@ -226,15 +252,41 @@
   if (m.from >= 0)
     [_game makeMove:m];
   [self refresh];
+  if ([_selfPlayButton state] == GC_ON_STATE && ![_game gameOver])
+    [self performSelector:@selector (continueSelfPlay:)
+               withObject:nil
+               afterDelay:0.8];
+  else
+    [self maybeComputer];
+}
+- (void)continueSelfPlay:(id)sender
+{
+  (void)sender;
+  [self maybeComputer];
 }
 - (void)newGame:(id)sender
 {
   (void)sender;
   if (_thinking)
     return;
+  _playerBlack = NO;
   [_game reset];
+  [_board setFlippedBoard:NO];
   [_board clearSelection];
   [self refresh];
+  [self maybeComputer];
+}
+- (void)newGameBlack:(id)sender
+{
+  (void)sender;
+  if (_thinking)
+    return;
+  _playerBlack = YES;
+  [_game reset];
+  [_board setFlippedBoard:YES];
+  [_board clearSelection];
+  [self refresh];
+  [self maybeComputer];
 }
 - (void)saveGame:(id)sender
 {
@@ -275,7 +327,8 @@
   if (_thinking)
     return;
   [_game undo];
-  if ([_computer state] == GC_ON_STATE && [_game blackToMove])
+  if ([_computer state] == GC_ON_STATE
+      && [_game blackToMove] != _playerBlack)
     [_game undo];
   [_board clearSelection];
   [self refresh];
@@ -294,6 +347,21 @@
   [_computer setTitle:[_computer state] == GC_ON_STATE
                           ? @"Play Computer: On"
                           : @"Play Computer: Off"];
+  [self maybeComputer];
+}
+- (void)toggleSelfPlay:(id)sender
+{
+  NSInteger state;
+  (void)sender;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (continueSelfPlay:)
+                                             object:nil];
+  state = [_selfPlayButton state] == GC_ON_STATE ? GC_OFF_STATE : GC_ON_STATE;
+  [_selfPlayButton setState:state];
+  [_selfPlayMenu setState:state];
+  [_selfPlayButton setTitle:state == GC_ON_STATE
+                                ? @"Computer vs Computer: On"
+                                : @"Computer vs Computer: Off"];
   [self maybeComputer];
 }
 - (void)showInfo:(id)sender
@@ -365,6 +433,8 @@
   [_history release];
   [_computer release];
   [_computerMenu release];
+  [_selfPlayButton release];
+  [_selfPlayMenu release];
   [_infoPanel release];
   [super dealloc];
 }
