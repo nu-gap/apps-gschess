@@ -80,6 +80,9 @@ near-best candidates within half a pawn of the engine's top choice.  This adds
 opening variety without deliberately choosing weak moves.  Player-versus-computer
 games continue to use the single best move.  Self-play also pauses briefly after
 each move so the resulting position can be observed before the next search.
+The same observation pause follows computer moves in player-versus-computer
+games.  The computer also waits briefly after the player's move before beginning
+its response, and the most recent opposing move is selected in the move history.
 
 ## Controls
 
@@ -89,8 +92,11 @@ each move so the resulting position can be observed before the next search.
   White still moves first, so the computer makes the opening move.
 - **Save Game…** writes a PGN record containing the moves, result, and current FEN.
 - **Undo** takes back the latest pair of moves when playing the computer.
+- **Resign** ends the game and awards the win to the opposing color.
 - **Play Computer** toggles the AI (the opposite of the selected player color).
 - **Computer vs Computer** continuously lets the AI play both colors.
+- **Sound Effects** toggles the White-move tick and Black-move tock sounds; the
+  preference is enabled by default and saved between launches.
 - **Flip Board** changes the viewing orientation.
 - Pawn promotion automatically chooses a queen.
 
@@ -98,6 +104,7 @@ each move so the resulting position can be observed before the next search.
 
 - `ChessGame.[hm]` — portable rules, position state, notation, and AI search.
 - `ChessBoardView.[hm]` — AppKit/GNUstep rendering and mouse interaction.
+- `CapturedPiecesView.[hm]` — captured material icons and score bar.
 - `AppDelegate.m` — window, controls, history, and background AI coordination.
 - `Resources/pieces.png` — generated transparent 4×3 sprite sheet.
 - `Resources/app-icon.png` / `.icns` — generated application icon artwork.

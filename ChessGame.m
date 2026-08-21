@@ -69,6 +69,8 @@ compareMoves (id left, id right, void *context)
 {
   ChessGame *g = [[[self class] allocWithZone:zone] init];
   g->_p = _p;
+  g->_resigned = _resigned;
+  g->_resignedBlack = _resignedBlack;
   [g->_undo release];
   [g->_mutableHistory release];
   [g->_positionKeys release];
@@ -96,6 +98,8 @@ compareMoves (id left, id right, void *context)
   _p.ep = -1;
   _p.rights = 15;
   _p.black = NO;
+  _resigned = NO;
+  _resignedBlack = NO;
   int back[8] = { GCRook, GCKnight, GCBishop, GCQueen,
                   GCKing, GCBishop, GCKnight, GCRook };
   for (int f = 0; f < 8; f++)
@@ -397,6 +401,8 @@ squareName (int s)
 }
 - (BOOL)makeMove:(GCMove)m
 {
+  if ([self gameOver])
+    return NO;
   BOOL found = NO;
   NSEnumerator *e = [[self legalMoves] objectEnumerator];
   NSValue *v;
@@ -427,6 +433,11 @@ squareName (int s)
 }
 - (void)undo
 {
+  if (_resigned)
+    {
+      _resigned = NO;
+      return;
+    }
   if (![_undo count])
     return;
   [[_undo lastObject] getBytes:&_p length:sizeof (_p)];
@@ -436,13 +447,25 @@ squareName (int s)
   if ([_positionKeys count] > 1)
     [_positionKeys removeLastObject];
 }
+- (void)resignBlack:(BOOL)black
+{
+  if (![self gameOver])
+    {
+      _resigned = YES;
+      _resignedBlack = black;
+    }
+}
 - (BOOL)gameOver
 {
-  return [[self legalMoves] count] == 0 ||
+  return _resigned || [[self legalMoves] count] == 0 ||
          [self currentPositionRepetitionCount] >= 5;
 }
 - (NSString *)status
 {
+  if (_resigned)
+    return [NSString stringWithFormat:@"%@ resigned — %@ wins",
+                                      _resignedBlack ? @"Black" : @"White",
+                                      _resignedBlack ? @"White" : @"Black"];
   if ([self currentPositionRepetitionCount] >= 5)
     return @"Draw — fivefold repetition";
   if (![self gameOver])
@@ -504,7 +527,9 @@ squareName (int s)
 - (NSString *)PGNString
 {
   NSString *result = @"*";
-  if ([self gameOver])
+  if (_resigned)
+    result = _resignedBlack ? @"1-0" : @"0-1";
+  else if ([self gameOver])
     result = [self inCheck:_p.black position:&_p]
                  ? (_p.black ? @"1-0" : @"0-1")
                  : @"1/2-1/2";

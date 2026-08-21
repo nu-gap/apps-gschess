@@ -1,5 +1,6 @@
 #import "AppDelegate.h"
 #import "ChessBoardView.h"
+#import "CapturedPiecesView.h"
 #if defined(__APPLE__)
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #endif
@@ -86,6 +87,12 @@
                               key:@"d"] retain];
   [_selfPlayMenu setState:GC_OFF_STATE];
   [game addItem:_selfPlayMenu];
+  [game addItem:[NSMenuItem separatorItem]];
+  _soundEffectsMenu = [[self menuItem:@"Sound Effects"
+                               action:@selector (toggleSoundEffects:)
+                                  key:@""] retain];
+  [_soundEffectsMenu setState:_soundEffects ? GC_ON_STATE : GC_OFF_STATE];
+  [game addItem:_soundEffectsMenu];
   [gameRoot setSubmenu:game];
   NSMenuItem *viewRoot = [[NSMenuItem alloc] initWithTitle:@"View"
                                                     action:NULL
@@ -103,6 +110,9 @@
 {
   (void)n;
   _game = [ChessGame new];
+  id soundPreference = [[NSUserDefaults standardUserDefaults]
+      objectForKey:@"GCSoundEffectsEnabled"];
+  _soundEffects = soundPreference ? [soundPreference boolValue] : YES;
   [self buildMenu];
   NSString *appIconPath = [[NSBundle mainBundle] pathForResource:@"app-icon"
                                                           ofType:@"png"];
@@ -119,11 +129,16 @@
   [_window setMinSize:NSMakeSize (700, 540)];
   NSView *c = [_window contentView];
   _board =
-      [[ChessBoardView alloc] initWithFrame:NSMakeRect (20, 55, 590, 575)];
+      [[ChessBoardView alloc] initWithFrame:NSMakeRect (20, 112, 590, 518)];
   [_board setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [_board setGame:_game];
   [_board setDelegate:self];
   [c addSubview:_board];
+  _captured = [[CapturedPiecesView alloc]
+      initWithFrame:NSMakeRect (20, 55, 590, 48)];
+  [_captured setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+  [_captured setGame:_game];
+  [c addSubview:_captured];
   _status = [[NSTextField alloc] initWithFrame:NSMakeRect (20, 18, 590, 28)];
   [_status setEditable:NO];
   [_status setBezeled:NO];
@@ -148,6 +163,9 @@
                                 [self button:@"Flip Board"
                                       action:@selector (flip:)
                                        frame:NSMakeRect (x, 430, 190, 32)],
+                                [self button:@"Resign"
+                                      action:@selector (resign:)
+                                       frame:NSMakeRect (x, 390, 190, 32)],
                                 nil];
   NSEnumerator *be = [buttons objectEnumerator];
   NSButton *b;
@@ -158,18 +176,18 @@
     }
   _computer = [[self button:@"Play Computer: On"
                      action:@selector (toggleComputer:)
-                      frame:NSMakeRect (x, 390, 190, 32)] retain];
+                      frame:NSMakeRect (x, 350, 190, 32)] retain];
   [_computer setState:GC_ON_STATE];
   [_computer setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [c addSubview:_computer];
   _selfPlayButton = [[self button:@"Computer vs Computer: Off"
                            action:@selector (toggleSelfPlay:)
-                            frame:NSMakeRect (x, 350, 190, 32)] retain];
+                            frame:NSMakeRect (x, 310, 190, 32)] retain];
   [_selfPlayButton setState:GC_OFF_STATE];
   [_selfPlayButton setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [c addSubview:_selfPlayButton];
   NSScrollView *scroll = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect (x, 55, 190, 275)] autorelease];
+      initWithFrame:NSMakeRect (x, 75, 190, 215)] autorelease];
   [scroll setHasVerticalScroller:YES];
   [scroll setAutoresizingMask:NSViewMinXMargin | NSViewHeightSizable];
   _history = [[NSTextView alloc] initWithFrame:[scroll bounds]];
@@ -190,32 +208,72 @@
 - (void)refresh
 {
   [_status
-      setStringValue:_thinking ? @"Computer is thinking…" : [_game status]];
+      setStringValue:_thinking && ![_game gameOver] ? @"Computer is thinking…"
+                                                  : [_game status]];
   NSMutableString *s = [NSMutableString string];
   NSArray *h = [_game history];
+  NSRange opponentRange = NSMakeRange (NSNotFound, 0);
+  BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
   for (NSUInteger i = 0; i < [h count]; i += 2)
     {
-      [s appendFormat:@"%2lu.  %@", (unsigned long)i / 2 + 1,
-                      [h objectAtIndex:i]];
+      [s appendFormat:@"%2lu.  ", (unsigned long)i / 2 + 1];
+      NSRange whiteRange = NSMakeRange ([s length],
+                                        [[h objectAtIndex:i] length]);
+      [s appendString:[h objectAtIndex:i]];
+      if (selfPlay || _playerBlack)
+        opponentRange = whiteRange;
       if (i + 1 < [h count])
-        [s appendFormat:@"   %@", [h objectAtIndex:i + 1]];
+        {
+          [s appendString:@"   "];
+          NSRange blackRange = NSMakeRange ([s length],
+                                            [[h objectAtIndex:i + 1] length]);
+          [s appendString:[h objectAtIndex:i + 1]];
+          if (selfPlay || !_playerBlack)
+            opponentRange = blackRange;
+        }
       [s appendString:@"\n"];
     }
   [_history setString:s];
+  if (opponentRange.location != NSNotFound)
+    {
+      [_history setSelectedRange:opponentRange];
+      [_history scrollRangeToVisible:opponentRange];
+    }
+  else
+    [_history setSelectedRange:NSMakeRange (0, 0)];
   [_board setNeedsDisplay:YES];
+  [_captured setNeedsDisplay:YES];
 }
 - (void)boardView:(ChessBoardView *)v requestedMove:(GCMove)m
 {
   (void)v;
-  if (_thinking || [_selfPlayButton state] == GC_ON_STATE
+  if (_thinking || _observingComputerMove || _waitingForComputer
+      || [_selfPlayButton state] == GC_ON_STATE
       || ([_computer state] == GC_ON_STATE
           && [_game blackToMove] != _playerBlack))
     return;
+  BOOL movedBlack = [_game blackToMove];
   if ([_game makeMove:m])
     {
+      [self playMoveSoundForBlack:movedBlack];
       [self refresh];
-      [self maybeComputer];
+      if ([_computer state] == GC_ON_STATE && ![_game gameOver]
+          && [_game blackToMove] != _playerBlack)
+        {
+          _waitingForComputer = YES;
+          [self performSelector:@selector (beginComputerResponse:)
+                     withObject:nil
+                     afterDelay:0.8];
+        }
+      else
+        [self maybeComputer];
     }
+}
+- (void)beginComputerResponse:(id)sender
+{
+  (void)sender;
+  _waitingForComputer = NO;
+  [self maybeComputer];
 }
 - (void)maybeComputer
 {
@@ -248,16 +306,33 @@
 - (void)finishComputer:(NSValue *)value
 {
   GCMove m = GCMoveFromValue (value);
+  BOOL movedBlack = [_game blackToMove];
+  BOOL moved = NO;
   _thinking = NO;
-  if (m.from >= 0)
-    [_game makeMove:m];
+  if (m.from >= 0 && [_game makeMove:m])
+    {
+      moved = YES;
+      [self playMoveSoundForBlack:movedBlack];
+    }
+  BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
+  if (moved && !selfPlay && ![_game gameOver])
+    _observingComputerMove = YES;
   [self refresh];
-  if ([_selfPlayButton state] == GC_ON_STATE && ![_game gameOver])
+  if (selfPlay && ![_game gameOver])
     [self performSelector:@selector (continueSelfPlay:)
+               withObject:nil
+               afterDelay:0.8];
+  else if (_observingComputerMove)
+    [self performSelector:@selector (endComputerMovePause:)
                withObject:nil
                afterDelay:0.8];
   else
     [self maybeComputer];
+}
+- (void)endComputerMovePause:(id)sender
+{
+  (void)sender;
+  _observingComputerMove = NO;
 }
 - (void)continueSelfPlay:(id)sender
 {
@@ -269,6 +344,14 @@
   (void)sender;
   if (_thinking)
     return;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (endComputerMovePause:)
+                                             object:nil];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (beginComputerResponse:)
+                                             object:nil];
+  _observingComputerMove = NO;
+  _waitingForComputer = NO;
   _playerBlack = NO;
   [_game reset];
   [_board setFlippedBoard:NO];
@@ -281,6 +364,14 @@
   (void)sender;
   if (_thinking)
     return;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (endComputerMovePause:)
+                                             object:nil];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (beginComputerResponse:)
+                                             object:nil];
+  _observingComputerMove = NO;
+  _waitingForComputer = NO;
   _playerBlack = YES;
   [_game reset];
   [_board setFlippedBoard:YES];
@@ -326,10 +417,37 @@
   (void)sender;
   if (_thinking)
     return;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (beginComputerResponse:)
+                                             object:nil];
+  _waitingForComputer = NO;
   [_game undo];
   if ([_computer state] == GC_ON_STATE
       && [_game blackToMove] != _playerBlack)
     [_game undo];
+  [_board clearSelection];
+  [self refresh];
+}
+- (void)resign:(id)sender
+{
+  (void)sender;
+  if ([_game gameOver])
+    return;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (continueSelfPlay:)
+                                             object:nil];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                           selector:@selector (beginComputerResponse:)
+                                             object:nil];
+  _waitingForComputer = NO;
+  BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
+  [_game resignBlack:selfPlay ? [_game blackToMove] : _playerBlack];
+  if (selfPlay)
+    {
+      [_selfPlayButton setState:GC_OFF_STATE];
+      [_selfPlayMenu setState:GC_OFF_STATE];
+      [_selfPlayButton setTitle:@"Computer vs Computer: Off"];
+    }
   [_board clearSelection];
   [self refresh];
 }
@@ -347,6 +465,13 @@
   [_computer setTitle:[_computer state] == GC_ON_STATE
                           ? @"Play Computer: On"
                           : @"Play Computer: Off"];
+  if ([_computer state] != GC_ON_STATE)
+    {
+      [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                               selector:@selector (beginComputerResponse:)
+                                                 object:nil];
+      _waitingForComputer = NO;
+    }
   [self maybeComputer];
 }
 - (void)toggleSelfPlay:(id)sender
@@ -363,6 +488,24 @@
                                 ? @"Computer vs Computer: On"
                                 : @"Computer vs Computer: Off"];
   [self maybeComputer];
+}
+- (void)playMoveSoundForBlack:(BOOL)black
+{
+  if (!_soundEffects)
+    return;
+  NSSound *sound = [NSSound soundNamed:black ? @"Pop" : @"Tink"];
+  if (sound)
+    [sound play];
+  else
+    NSBeep ();
+}
+- (void)toggleSoundEffects:(id)sender
+{
+  (void)sender;
+  _soundEffects = !_soundEffects;
+  [_soundEffectsMenu setState:_soundEffects ? GC_ON_STATE : GC_OFF_STATE];
+  [[NSUserDefaults standardUserDefaults] setBool:_soundEffects
+                                          forKey:@"GCSoundEffectsEnabled"];
 }
 - (void)showInfo:(id)sender
 {
@@ -428,6 +571,7 @@
 {
   [_window release];
   [_board release];
+  [_captured release];
   [_game release];
   [_status release];
   [_history release];
@@ -435,6 +579,7 @@
   [_computerMenu release];
   [_selfPlayButton release];
   [_selfPlayMenu release];
+  [_soundEffectsMenu release];
   [_infoPanel release];
   [super dealloc];
 }

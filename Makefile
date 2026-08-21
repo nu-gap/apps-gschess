@@ -1,7 +1,7 @@
 .PHONY: mac gnustep test clean
 
 APP=GrandmasterChess
-SOURCES=main.m AppDelegate.m ChessGame.m ChessBoardView.m
+SOURCES=main.m AppDelegate.m ChessGame.m ChessBoardView.m CapturedPiecesView.m
 
 mac:
 	mkdir -p build/$(APP).app/Contents/MacOS build/$(APP).app/Contents/Resources

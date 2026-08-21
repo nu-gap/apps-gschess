@@ -56,6 +56,8 @@ GCMoveFromValue (NSValue *v)
   NSMutableArray *_undo;
   NSMutableArray *_mutableHistory;
   NSMutableArray *_positionKeys;
+  BOOL _resigned;
+  BOOL _resignedBlack;
 }
 /** Returns whether Black is the side to move. */
 - (BOOL)blackToMove;
@@ -75,6 +77,8 @@ GCMoveFromValue (NSValue *v)
 - (BOOL)makeMove:(GCMove)move;
 /** Restores the position preceding the latest move. */
 - (void)undo;
+/** Ends the game because the specified color resigned. */
+- (void)resignBlack:(BOOL)black;
 /** Restores the standard initial chess position. */
 - (void)reset;
 /** Searches using depth-limited negamax with alpha-beta pruning. */

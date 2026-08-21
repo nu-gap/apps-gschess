@@ -54,6 +54,14 @@ main (void)
            @"varied opening selection returns a legal move");
 
   [g reset];
+  [g resignBlack:NO];
+  require ([g gameOver] && [[g status] containsString:@"Black wins"]
+               && [[g PGNString] containsString:@"[Result \"0-1\"]"],
+           @"resignation ends the game and records the winner");
+  [g undo];
+  require (![g gameOver], @"undo clears a resignation");
+
+  [g reset];
   for (int cycle = 0; cycle < 4; cycle++)
     {
       require ([g makeMove:move (g, 6, 21)], @"g1-f3 repetition move");
