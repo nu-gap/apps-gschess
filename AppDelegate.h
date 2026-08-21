@@ -13,6 +13,8 @@
   NSButton *_selfPlayButton;
   NSMenuItem *_selfPlayMenu;
   NSMenuItem *_soundEffectsMenu;
+  NSSound *_whiteMoveSound;
+  NSSound *_blackMoveSound;
   NSPanel *_infoPanel;
   BOOL _thinking;
   BOOL _playerBlack;

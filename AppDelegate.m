@@ -23,6 +23,54 @@
 #define GC_OFF_STATE NSControlStateValueOff
 #endif
 
+static void
+appendUInt16 (NSMutableData *data, uint16_t value)
+{
+  uint8_t bytes[2] = { value & 255, (value >> 8) & 255 };
+  [data appendBytes:bytes length:2];
+}
+static void
+appendUInt32 (NSMutableData *data, uint32_t value)
+{
+  uint8_t bytes[4] = { value & 255, (value >> 8) & 255,
+                       (value >> 16) & 255, (value >> 24) & 255 };
+  [data appendBytes:bytes length:4];
+}
+static NSSound *
+moveSound (NSUInteger frequency, NSTimeInterval duration)
+{
+  const NSUInteger sampleRate = 22050;
+  NSUInteger sampleCount = (NSUInteger)(sampleRate * duration);
+  uint32_t dataSize = (uint32_t)(sampleCount * 2);
+  NSMutableData *wave = [NSMutableData dataWithCapacity:44 + dataSize];
+  [wave appendBytes:"RIFF" length:4];
+  appendUInt32 (wave, 36 + dataSize);
+  [wave appendBytes:"WAVEfmt " length:8];
+  appendUInt32 (wave, 16);
+  appendUInt16 (wave, 1);
+  appendUInt16 (wave, 1);
+  appendUInt32 (wave, (uint32_t)sampleRate);
+  appendUInt32 (wave, (uint32_t)(sampleRate * 2));
+  appendUInt16 (wave, 2);
+  appendUInt16 (wave, 16);
+  [wave appendBytes:"data" length:4];
+  appendUInt32 (wave, dataSize);
+  NSUInteger period = MAX ((NSUInteger)2, sampleRate / frequency);
+  for (NSUInteger i = 0; i < sampleCount; i++)
+    {
+      NSInteger position = (NSInteger)(i % period);
+      NSInteger half = (NSInteger)period / 2;
+      NSInteger triangle = position < half ? position : (NSInteger)period - position;
+      NSInteger centered = triangle * 2 - half;
+      NSInteger envelope = (NSInteger)(sampleCount - i);
+      int16_t sample
+          = (int16_t)(centered * 24000 / MAX ((NSInteger)1, half)
+                      * envelope / (NSInteger)sampleCount);
+      appendUInt16 (wave, (uint16_t)sample);
+    }
+  return [[[NSSound alloc] initWithData:wave] autorelease];
+}
+
 @implementation AppDelegate
 - (NSButton *)button:(NSString *)title action:(SEL)action frame:(NSRect)frame
 {
@@ -121,6 +169,8 @@
   id soundPreference = [[NSUserDefaults standardUserDefaults]
       objectForKey:@"GCSoundEffectsEnabled"];
   _soundEffects = soundPreference ? [soundPreference boolValue] : YES;
+  _whiteMoveSound = [moveSound (920, 0.07) retain];
+  _blackMoveSound = [moveSound (360, 0.14) retain];
   [self buildMenu];
   NSString *appIconPath = [[NSBundle mainBundle] pathForResource:@"app-icon"
                                                           ofType:@"png"];
@@ -501,9 +551,12 @@
 {
   if (!_soundEffects)
     return;
-  NSSound *sound = [NSSound soundNamed:black ? @"Pop" : @"Tink"];
+  NSSound *sound = black ? _blackMoveSound : _whiteMoveSound;
   if (sound)
-    [sound play];
+    {
+      [sound stop];
+      [sound play];
+    }
   else
     NSBeep ();
 }
@@ -588,6 +641,8 @@
   [_selfPlayButton release];
   [_selfPlayMenu release];
   [_soundEffectsMenu release];
+  [_whiteMoveSound release];
+  [_blackMoveSound release];
   [_infoPanel release];
   [super dealloc];
 }
