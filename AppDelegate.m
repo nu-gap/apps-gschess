@@ -54,10 +54,12 @@
   [app addItem:[self menuItem:@"About Grandmaster Chess"
                        action:@selector (showInfo:)
                           key:@""]];
+#if !defined(GNUSTEP)
   [app addItem:[NSMenuItem separatorItem]];
   [app addItem:[self menuItem:@"Quit Grandmaster Chess"
                        action:@selector (terminate:)
                           key:@"q"]];
+#endif
   [appRoot setSubmenu:app];
   NSMenuItem *gameRoot = [[NSMenuItem alloc] initWithTitle:@"Game"
                                                     action:NULL
@@ -103,6 +105,12 @@
                         action:@selector (flip:)
                            key:@"f"]];
   [viewRoot setSubmenu:view];
+#if defined(GNUSTEP)
+  [bar addItem:[NSMenuItem separatorItem]];
+  [bar addItem:[self menuItem:@"Quit Grandmaster Chess"
+                       action:@selector (terminate:)
+                          key:@"q"]];
+#endif
   [NSApp setMainMenu:bar];
   [bar release];
 }
