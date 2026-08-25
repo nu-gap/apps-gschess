@@ -13,6 +13,12 @@
   NSButton *_selfPlayButton;
   NSMenuItem *_selfPlayMenu;
   NSMenuItem *_soundEffectsMenu;
+  NSButton *_speechButton;
+  NSMenuItem *_speechMenu;
+  NSMenuItem *_teachingThreatsMenu;
+  id _speechSynthesizer;
+  NSMutableArray *_speechQueue;
+  NSTask *_speechTask;
   NSSound *_whiteMoveSound;
   NSSound *_blackMoveSound;
   NSPanel *_infoPanel;
@@ -20,6 +26,9 @@
   BOOL _playerBlack;
   BOOL _varyComputerMove;
   BOOL _soundEffects;
+  BOOL _speechEnabled;
+  BOOL _teachingThreatsEnabled;
+  BOOL _speechActive;
   BOOL _observingComputerMove;
   BOOL _waitingForComputer;
 }

@@ -14,6 +14,13 @@
   NSInteger _selected;
   NSArray *_targets;
   NSImage *_pieces;
+  GCMove _recommendedMove;
+  BOOL _hasRecommendedMove;
+  BOOL _teachingThreats;
+  NSInteger _hoveredTarget;
+  NSSet *_threatenedTargets;
+  NSArray *_hoverAttackers;
+  NSTrackingArea *_trackingArea;
 }
 /** Sets the chess position displayed by the board. */
 - (void)setGame:(ChessGame *)game;
@@ -29,4 +36,8 @@
 - (BOOL)flippedBoard;
 /** Clears the selection and legal-move markers. */
 - (void)clearSelection;
+/** Highlights an engine-recommended move for learning. */
+- (void)showRecommendedMove:(GCMove)move;
+/** Shows whether legal destinations expose the moved piece to capture. */
+- (void)setTeachingThreatsEnabled:(BOOL)enabled;
 @end

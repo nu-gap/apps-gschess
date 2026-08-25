@@ -1,6 +1,6 @@
 #import "AppDelegate.h"
-#import "ChessBoardView.h"
 #import "CapturedPiecesView.h"
+#import "ChessBoardView.h"
 #if defined(__APPLE__)
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #endif
@@ -32,8 +32,8 @@ appendUInt16 (NSMutableData *data, uint16_t value)
 static void
 appendUInt32 (NSMutableData *data, uint32_t value)
 {
-  uint8_t bytes[4] = { value & 255, (value >> 8) & 255,
-                       (value >> 16) & 255, (value >> 24) & 255 };
+  uint8_t bytes[4] = { value & 255, (value >> 8) & 255, (value >> 16) & 255,
+                       (value >> 24) & 255 };
   [data appendBytes:bytes length:4];
 }
 static NSSound *
@@ -60,15 +60,35 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
     {
       NSInteger position = (NSInteger)(i % period);
       NSInteger half = (NSInteger)period / 2;
-      NSInteger triangle = position < half ? position : (NSInteger)period - position;
+      NSInteger triangle
+          = position < half ? position : (NSInteger)period - position;
       NSInteger centered = triangle * 2 - half;
       NSInteger envelope = (NSInteger)(sampleCount - i);
-      int16_t sample
-          = (int16_t)(centered * 24000 / MAX ((NSInteger)1, half)
-                      * envelope / (NSInteger)sampleCount);
+      int16_t sample = (int16_t)(centered * 24000 / MAX ((NSInteger)1, half)
+                                 * envelope / (NSInteger)sampleCount);
       appendUInt16 (wave, (uint16_t)sample);
     }
   return [[[NSSound alloc] initWithData:wave] autorelease];
+}
+static NSString *
+moveSquareName (int square)
+{
+  return [NSString
+      stringWithFormat:@"%c%d", 'a' + (square & 7), (square >> 3) + 1];
+}
+static NSString *
+moveDescription (ChessGame *game, GCMove move)
+{
+  uint8_t piece = [game pieceAt:move.from];
+  NSArray *names =
+      [NSArray arrayWithObjects:@"", @"Pawn", @"Knight", @"Bishop", @"Rook",
+                                @"Queen", @"King", nil];
+  if (move.flags & GCCastle)
+    return move.to > move.from ? @"Castle king side" : @"Castle queen side";
+  return [NSString
+      stringWithFormat:@"%@ from %@ to %@%@", [names objectAtIndex:piece & 7],
+                       moveSquareName (move.from), moveSquareName (move.to),
+                       (move.flags & GCCapture) ? @", capturing" : @""];
 }
 
 @implementation AppDelegate
@@ -79,6 +99,7 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   [b setTarget:self];
   [b setAction:action];
   [b setBezelStyle:GC_BUTTON_STYLE];
+  [b setFont:[NSFont systemFontOfSize:22]];
   return b;
 }
 - (NSMenuItem *)menuItem:(NSString *)title
@@ -126,6 +147,9 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   [game addItem:[self menuItem:@"Undo Move"
                         action:@selector (undo:)
                            key:@"z"]];
+  [game addItem:[self menuItem:@"Suggest Move"
+                        action:@selector (suggestMove:)
+                           key:@"h"]];
   [game addItem:[NSMenuItem separatorItem]];
   _computerMenu = [[self menuItem:@"Play Computer"
                            action:@selector (toggleComputer:)
@@ -143,6 +167,17 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
                                   key:@""] retain];
   [_soundEffectsMenu setState:_soundEffects ? GC_ON_STATE : GC_OFF_STATE];
   [game addItem:_soundEffectsMenu];
+  _speechMenu = [[self menuItem:@"Announce Moves"
+                         action:@selector (toggleSpeech:)
+                            key:@""] retain];
+  [_speechMenu setState:_speechEnabled ? GC_ON_STATE : GC_OFF_STATE];
+  [game addItem:_speechMenu];
+  _teachingThreatsMenu = [[self menuItem:@"Teaching: Show Move Threats"
+                                  action:@selector (toggleTeachingThreats:)
+                                     key:@""] retain];
+  [_teachingThreatsMenu setState:_teachingThreatsEnabled ? GC_ON_STATE
+                                                        : GC_OFF_STATE];
+  [game addItem:_teachingThreatsMenu];
   [gameRoot setSubmenu:game];
   NSMenuItem *viewRoot = [[NSMenuItem alloc] initWithTitle:@"View"
                                                     action:NULL
@@ -169,6 +204,13 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   id soundPreference = [[NSUserDefaults standardUserDefaults]
       objectForKey:@"GCSoundEffectsEnabled"];
   _soundEffects = soundPreference ? [soundPreference boolValue] : YES;
+  id speechPreference =
+      [[NSUserDefaults standardUserDefaults] objectForKey:@"GCSpeechEnabled"];
+  _speechEnabled = speechPreference ? [speechPreference boolValue] : NO;
+  id teachingPreference = [[NSUserDefaults standardUserDefaults]
+      objectForKey:@"GCTeachingThreatsEnabled"];
+  _teachingThreatsEnabled =
+      teachingPreference ? [teachingPreference boolValue] : NO;
   _whiteMoveSound = [moveSound (920, 0.07) retain];
   _blackMoveSound = [moveSound (360, 0.14) retain];
   [self buildMenu];
@@ -179,51 +221,53 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   if (appIcon)
     [NSApp setApplicationIconImage:appIcon];
   _window =
-      [[NSWindow alloc] initWithContentRect:NSMakeRect (120, 100, 850, 650)
+      [[NSWindow alloc] initWithContentRect:NSMakeRect (80, 50, 1700, 1300)
                                   styleMask:GC_WINDOW_STYLE
                                     backing:NSBackingStoreBuffered
                                       defer:NO];
   [_window setTitle:@"Grandmaster Chess"];
-  [_window setMinSize:NSMakeSize (700, 540)];
+  [_window setMinSize:NSMakeSize (1400, 1080)];
   NSView *c = [_window contentView];
   _board =
-      [[ChessBoardView alloc] initWithFrame:NSMakeRect (20, 112, 590, 518)];
+      [[ChessBoardView alloc] initWithFrame:NSMakeRect (40, 224, 1180, 1036)];
   [_board setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [_board setGame:_game];
   [_board setDelegate:self];
+  [_board setTeachingThreatsEnabled:_teachingThreatsEnabled];
   [c addSubview:_board];
+  [_window setAcceptsMouseMovedEvents:YES];
   _captured = [[CapturedPiecesView alloc]
-      initWithFrame:NSMakeRect (20, 55, 590, 48)];
+      initWithFrame:NSMakeRect (40, 110, 1180, 96)];
   [_captured setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [_captured setGame:_game];
   [c addSubview:_captured];
-  _status = [[NSTextField alloc] initWithFrame:NSMakeRect (20, 18, 590, 28)];
+  _status = [[NSTextField alloc] initWithFrame:NSMakeRect (40, 36, 1180, 56)];
   [_status setEditable:NO];
   [_status setBezeled:NO];
   [_status setDrawsBackground:NO];
-  [_status setFont:[NSFont boldSystemFontOfSize:16]];
+  [_status setFont:[NSFont boldSystemFontOfSize:32]];
   [_status setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
   [c addSubview:_status];
-  CGFloat x = 630;
+  CGFloat x = 1260;
   NSArray *buttons =
       [NSArray arrayWithObjects:[self button:@"New: Play White"
                                       action:@selector (newGame:)
-                                       frame:NSMakeRect (x, 590, 190, 32)],
+                                       frame:NSMakeRect (x, 1180, 380, 64)],
                                 [self button:@"New: Play Black"
                                       action:@selector (newGameBlack:)
-                                       frame:NSMakeRect (x, 550, 190, 32)],
+                                       frame:NSMakeRect (x, 1100, 380, 64)],
                                 [self button:@"Save Game…"
                                       action:@selector (saveGame:)
-                                       frame:NSMakeRect (x, 510, 190, 32)],
+                                       frame:NSMakeRect (x, 1020, 380, 64)],
                                 [self button:@"Undo"
                                       action:@selector (undo:)
-                                       frame:NSMakeRect (x, 470, 190, 32)],
+                                       frame:NSMakeRect (x, 940, 380, 64)],
                                 [self button:@"Flip Board"
                                       action:@selector (flip:)
-                                       frame:NSMakeRect (x, 430, 190, 32)],
+                                       frame:NSMakeRect (x, 860, 380, 64)],
                                 [self button:@"Resign"
                                       action:@selector (resign:)
-                                       frame:NSMakeRect (x, 390, 190, 32)],
+                                       frame:NSMakeRect (x, 780, 380, 64)],
                                 nil];
   NSEnumerator *be = [buttons objectEnumerator];
   NSButton *b;
@@ -234,23 +278,36 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
     }
   _computer = [[self button:@"Play Computer: On"
                      action:@selector (toggleComputer:)
-                      frame:NSMakeRect (x, 350, 190, 32)] retain];
+                      frame:NSMakeRect (x, 700, 380, 64)] retain];
   [_computer setState:GC_ON_STATE];
   [_computer setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [c addSubview:_computer];
   _selfPlayButton = [[self button:@"Computer vs Computer: Off"
                            action:@selector (toggleSelfPlay:)
-                            frame:NSMakeRect (x, 310, 190, 32)] retain];
+                            frame:NSMakeRect (x, 620, 380, 64)] retain];
   [_selfPlayButton setState:GC_OFF_STATE];
   [_selfPlayButton setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [c addSubview:_selfPlayButton];
+  NSButton *suggestButton = [self button:@"Suggest Move"
+                                  action:@selector (suggestMove:)
+                                   frame:NSMakeRect (x, 540, 380, 64)];
+  [suggestButton setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [c addSubview:suggestButton];
+  _speechButton = [[self button:@"Announce Moves: Off"
+                         action:@selector (toggleSpeech:)
+                          frame:NSMakeRect (x, 460, 380, 64)] retain];
+  [_speechButton setState:_speechEnabled ? GC_ON_STATE : GC_OFF_STATE];
+  [_speechButton setTitle:_speechEnabled ? @"Announce Moves: On"
+                                         : @"Announce Moves: Off"];
+  [_speechButton setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [c addSubview:_speechButton];
   NSScrollView *scroll = [[[NSScrollView alloc]
-      initWithFrame:NSMakeRect (x, 75, 190, 215)] autorelease];
+      initWithFrame:NSMakeRect (x, 80, 380, 340)] autorelease];
   [scroll setHasVerticalScroller:YES];
   [scroll setAutoresizingMask:NSViewMinXMargin | NSViewHeightSizable];
   _history = [[NSTextView alloc] initWithFrame:[scroll bounds]];
   [_history setEditable:NO];
-  [_history setFont:[NSFont userFixedPitchFontOfSize:13]];
+  [_history setFont:[NSFont userFixedPitchFontOfSize:26]];
   [scroll setDocumentView:_history];
   [c addSubview:scroll];
   [self refresh];
@@ -265,9 +322,9 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 }
 - (void)refresh
 {
-  [_status
-      setStringValue:_thinking && ![_game gameOver] ? @"Computer is thinking…"
-                                                  : [_game status]];
+  [_status setStringValue:_thinking && ![_game gameOver]
+                              ? @"Computer is thinking…"
+                              : [_game status]];
   NSMutableString *s = [NSMutableString string];
   NSArray *h = [_game history];
   NSRange opponentRange = NSMakeRange (NSNotFound, 0);
@@ -275,16 +332,16 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   for (NSUInteger i = 0; i < [h count]; i += 2)
     {
       [s appendFormat:@"%2lu.  ", (unsigned long)i / 2 + 1];
-      NSRange whiteRange = NSMakeRange ([s length],
-                                        [[h objectAtIndex:i] length]);
+      NSRange whiteRange
+          = NSMakeRange ([s length], [[h objectAtIndex:i] length]);
       [s appendString:[h objectAtIndex:i]];
       if (selfPlay || _playerBlack)
         opponentRange = whiteRange;
       if (i + 1 < [h count])
         {
           [s appendString:@"   "];
-          NSRange blackRange = NSMakeRange ([s length],
-                                            [[h objectAtIndex:i + 1] length]);
+          NSRange blackRange
+              = NSMakeRange ([s length], [[h objectAtIndex:i + 1] length]);
           [s appendString:[h objectAtIndex:i + 1]];
           if (selfPlay || !_playerBlack)
             opponentRange = blackRange;
@@ -305,18 +362,20 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 - (void)boardView:(ChessBoardView *)v requestedMove:(GCMove)m
 {
   (void)v;
-  if (_thinking || _observingComputerMove || _waitingForComputer
-      || [_selfPlayButton state] == GC_ON_STATE
-      || ([_computer state] == GC_ON_STATE
-          && [_game blackToMove] != _playerBlack))
+  if (_thinking || _observingComputerMove || _waitingForComputer ||
+      [_selfPlayButton state] == GC_ON_STATE
+      || ([_computer state] == GC_ON_STATE &&
+          [_game blackToMove] != _playerBlack))
     return;
   BOOL movedBlack = [_game blackToMove];
+  NSString *spokenMove = moveDescription (_game, m);
   if ([_game makeMove:m])
     {
       [self playMoveSoundForBlack:movedBlack];
+      [self announceMove:spokenMove];
       [self refresh];
-      if ([_computer state] == GC_ON_STATE && ![_game gameOver]
-          && [_game blackToMove] != _playerBlack)
+      if ([_computer state] == GC_ON_STATE && ![_game gameOver] &&
+          [_game blackToMove] != _playerBlack)
         {
           _waitingForComputer = YES;
           [self performSelector:@selector (beginComputerResponse:)
@@ -337,8 +396,8 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 {
   BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
   if ((!selfPlay
-       && ([_computer state] != GC_ON_STATE
-           || [_game blackToMove] == _playerBlack))
+       && ([_computer state] != GC_ON_STATE ||
+           [_game blackToMove] == _playerBlack))
       || [_game gameOver] || _thinking)
     return;
   _thinking = YES;
@@ -353,9 +412,8 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 - (void)searchThread:(ChessGame *)snapshot
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  GCMove m = _varyComputerMove
-                 ? [snapshot variedOpeningMoveAtDepth:3]
-                 : [snapshot bestMoveAtDepth:3];
+  GCMove m = _varyComputerMove ? [snapshot variedOpeningMoveAtDepth:3]
+                               : [snapshot bestMoveAtDepth:3];
   [self performSelectorOnMainThread:@selector (finishComputer:)
                          withObject:GCMoveValue (m)
                       waitUntilDone:NO];
@@ -364,6 +422,7 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 - (void)finishComputer:(NSValue *)value
 {
   GCMove m = GCMoveFromValue (value);
+  NSString *spokenMove = m.from >= 0 ? moveDescription (_game, m) : nil;
   BOOL movedBlack = [_game blackToMove];
   BOOL moved = NO;
   _thinking = NO;
@@ -371,6 +430,8 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
     {
       moved = YES;
       [self playMoveSoundForBlack:movedBlack];
+      [self announceMove:spokenMove];
+      [_board clearSelection];
     }
   BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
   if (moved && !selfPlay && ![_game gameOver])
@@ -402,11 +463,13 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   (void)sender;
   if (_thinking)
     return;
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector (endComputerMovePause:)
+                                       object:nil];
   [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (endComputerMovePause:)
-                                             object:nil];
-  [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (beginComputerResponse:)
+                                           selector:@selector
+                                           (beginComputerResponse:)
                                              object:nil];
   _observingComputerMove = NO;
   _waitingForComputer = NO;
@@ -422,11 +485,13 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   (void)sender;
   if (_thinking)
     return;
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector (endComputerMovePause:)
+                                       object:nil];
   [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (endComputerMovePause:)
-                                             object:nil];
-  [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (beginComputerResponse:)
+                                           selector:@selector
+                                           (beginComputerResponse:)
                                              object:nil];
   _observingComputerMove = NO;
   _waitingForComputer = NO;
@@ -476,12 +541,12 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   if (_thinking)
     return;
   [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (beginComputerResponse:)
+                                           selector:@selector
+                                           (beginComputerResponse:)
                                              object:nil];
   _waitingForComputer = NO;
   [_game undo];
-  if ([_computer state] == GC_ON_STATE
-      && [_game blackToMove] != _playerBlack)
+  if ([_computer state] == GC_ON_STATE && [_game blackToMove] != _playerBlack)
     [_game undo];
   [_board clearSelection];
   [self refresh];
@@ -491,11 +556,13 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   (void)sender;
   if ([_game gameOver])
     return;
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector (continueSelfPlay:)
+                                       object:nil];
   [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (continueSelfPlay:)
-                                             object:nil];
-  [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (beginComputerResponse:)
+                                           selector:@selector
+                                           (beginComputerResponse:)
                                              object:nil];
   _waitingForComputer = NO;
   BOOL selfPlay = [_selfPlayButton state] == GC_ON_STATE;
@@ -526,7 +593,8 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   if ([_computer state] != GC_ON_STATE)
     {
       [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                               selector:@selector (beginComputerResponse:)
+                                               selector:@selector
+                                               (beginComputerResponse:)
                                                  object:nil];
       _waitingForComputer = NO;
     }
@@ -536,9 +604,10 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
 {
   NSInteger state;
   (void)sender;
-  [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                           selector:@selector (continueSelfPlay:)
-                                             object:nil];
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector (continueSelfPlay:)
+                                       object:nil];
   state = [_selfPlayButton state] == GC_ON_STATE ? GC_OFF_STATE : GC_ON_STATE;
   [_selfPlayButton setState:state];
   [_selfPlayMenu setState:state];
@@ -567,6 +636,159 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   [_soundEffectsMenu setState:_soundEffects ? GC_ON_STATE : GC_OFF_STATE];
   [[NSUserDefaults standardUserDefaults] setBool:_soundEffects
                                           forKey:@"GCSoundEffectsEnabled"];
+}
+- (void)announceMove:(NSString *)move
+{
+  if (!_speechEnabled || !move)
+    return;
+  if (!_speechQueue)
+    _speechQueue = [[NSMutableArray alloc] init];
+  [_speechQueue addObject:move];
+  [self speakNextAnnouncement];
+}
+- (void)speakNextAnnouncement
+{
+  if (_speechActive || !_speechEnabled || ![_speechQueue count])
+    return;
+  if (!_speechSynthesizer)
+    {
+      Class speechClass = NSClassFromString (@"NSSpeechSynthesizer");
+      if (speechClass)
+        {
+          _speechSynthesizer = [[speechClass alloc] init];
+          if ([_speechSynthesizer respondsToSelector:@selector (setDelegate:)])
+            [_speechSynthesizer setDelegate:self];
+        }
+    }
+  NSString *announcement = [[_speechQueue objectAtIndex:0] retain];
+  [_speechQueue removeObjectAtIndex:0];
+  if (_speechSynthesizer &&
+      [_speechSynthesizer respondsToSelector:@selector (startSpeakingString:)])
+    {
+      BOOL (*startSpeaking)(id, SEL, NSString *) =
+          (BOOL (*)(id, SEL, NSString *))
+              [_speechSynthesizer methodForSelector:
+                                      @selector (startSpeakingString:)];
+      _speechActive = YES;
+      if (!startSpeaking (_speechSynthesizer,
+                          @selector (startSpeakingString:), announcement))
+        {
+          _speechActive = NO;
+          [self performSelector:@selector (speakNextAnnouncement)
+                     withObject:nil
+                     afterDelay:0];
+        }
+    }
+#if defined(GNUSTEP)
+  else if ([[NSFileManager defaultManager]
+               isExecutableFileAtPath:@"/usr/bin/espeak"])
+    {
+      _speechActive = YES;
+      _speechTask = [[NSTask launchedTaskWithLaunchPath:@"/usr/bin/espeak"
+                              arguments:[NSArray arrayWithObject:announcement]]
+                       retain];
+      [[NSNotificationCenter defaultCenter]
+          addObserver:self
+             selector:@selector (speechTaskDidTerminate:)
+                 name:NSTaskDidTerminateNotification
+               object:_speechTask];
+    }
+#endif
+  [announcement release];
+}
+- (void)speechSynthesizer:(id)sender didFinishSpeaking:(BOOL)finished
+{
+  (void)sender;
+  (void)finished;
+  _speechActive = NO;
+  [self speakNextAnnouncement];
+}
+- (void)speechTaskDidTerminate:(NSNotification *)notification
+{
+  [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                  name:NSTaskDidTerminateNotification
+                                                object:[notification object]];
+  [_speechTask release];
+  _speechTask = nil;
+  _speechActive = NO;
+  [self speakNextAnnouncement];
+}
+- (void)toggleSpeech:(id)sender
+{
+  (void)sender;
+  _speechEnabled = !_speechEnabled;
+  [_speechMenu setState:_speechEnabled ? GC_ON_STATE : GC_OFF_STATE];
+  [_speechButton setState:_speechEnabled ? GC_ON_STATE : GC_OFF_STATE];
+  [_speechButton setTitle:_speechEnabled ? @"Announce Moves: On"
+                                         : @"Announce Moves: Off"];
+  [[NSUserDefaults standardUserDefaults] setBool:_speechEnabled
+                                          forKey:@"GCSpeechEnabled"];
+  if (_speechEnabled)
+    [self announceMove:@"Move announcements enabled"];
+  else
+    {
+      [_speechQueue removeAllObjects];
+      if ([_speechSynthesizer respondsToSelector:@selector (stopSpeaking)])
+        {
+          void (*stopSpeaking)(id, SEL) =
+              (void (*)(id, SEL))
+                  [_speechSynthesizer methodForSelector:@selector (stopSpeaking)];
+          stopSpeaking (_speechSynthesizer, @selector (stopSpeaking));
+        }
+#if defined(GNUSTEP)
+      if ([_speechTask isRunning])
+        [_speechTask terminate];
+#endif
+      _speechActive = NO;
+    }
+}
+- (void)toggleTeachingThreats:(id)sender
+{
+  (void)sender;
+  _teachingThreatsEnabled = !_teachingThreatsEnabled;
+  [_teachingThreatsMenu setState:_teachingThreatsEnabled ? GC_ON_STATE
+                                                       : GC_OFF_STATE];
+  [_board setTeachingThreatsEnabled:_teachingThreatsEnabled];
+  [[NSUserDefaults standardUserDefaults]
+      setBool:_teachingThreatsEnabled
+       forKey:@"GCTeachingThreatsEnabled"];
+}
+- (void)suggestMove:(id)sender
+{
+  ChessGame *snapshot;
+  (void)sender;
+  if (_thinking || [_game gameOver])
+    return;
+  _thinking = YES;
+  [_board clearSelection];
+  [self refresh];
+  snapshot = [_game copy];
+  [NSThread detachNewThreadSelector:@selector (suggestionThread:)
+                           toTarget:self
+                         withObject:snapshot];
+  [snapshot release];
+}
+- (void)suggestionThread:(ChessGame *)snapshot
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  GCMove move = [snapshot bestMoveAtDepth:3];
+  [self performSelectorOnMainThread:@selector (finishSuggestion:)
+                         withObject:GCMoveValue (move)
+                      waitUntilDone:NO];
+  [pool drain];
+}
+- (void)finishSuggestion:(NSValue *)value
+{
+  GCMove move = GCMoveFromValue (value);
+  NSString *description = move.from >= 0 ? moveDescription (_game, move) : nil;
+  _thinking = NO;
+  [self refresh];
+  if (description)
+    {
+      [_board showRecommendedMove:move];
+      [_status setStringValue:[NSString stringWithFormat:@"Recommended: %@",
+                                                         description]];
+    }
 }
 - (void)showInfo:(id)sender
 {
@@ -641,6 +863,15 @@ moveSound (NSUInteger frequency, NSTimeInterval duration)
   [_selfPlayButton release];
   [_selfPlayMenu release];
   [_soundEffectsMenu release];
+  [_speechButton release];
+  [_speechMenu release];
+  [_teachingThreatsMenu release];
+  [_speechSynthesizer release];
+  [_speechQueue release];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  if ([_speechTask isRunning])
+    [_speechTask terminate];
+  [_speechTask release];
   [_whiteMoveSound release];
   [_blackMoveSound release];
   [_infoPanel release];

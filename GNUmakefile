@@ -1,3 +1,6 @@
+ifeq ($(strip $(GNUSTEP_MAKEFILES)),)
+include Makefile
+else
 include $(GNUSTEP_MAKEFILES)/common.make
 
 APP_NAME = GrandmasterChess
@@ -8,3 +11,4 @@ GrandmasterChess_APPLICATION_ICON = Resources/app-icon.png
 ADDITIONAL_OBJCFLAGS = -Wall -Wextra
 
 include $(GNUSTEP_MAKEFILES)/application.make
+endif

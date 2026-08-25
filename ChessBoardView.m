@@ -9,7 +9,8 @@
 @implementation ChessBoardView
 - (void)drawCoordinate:(NSString *)text atPoint:(NSPoint)point
 {
-  NSFont *font = [NSFont boldSystemFontOfSize:12];
+  CGFloat squareSize = [self boardRect].size.width / 8;
+  NSFont *font = [NSFont boldSystemFontOfSize:MAX (12.0, squareSize * .12)];
   NSDictionary *outline = [NSDictionary
       dictionaryWithObjectsAndKeys:font, NSFontAttributeName,
                                    [NSColor colorWithWhite:0 alpha:.95],
@@ -30,7 +31,10 @@
   if ((self = [super initWithFrame:frame]))
     {
       _selected = -1;
+      _hoveredTarget = -1;
       _targets = [[NSArray alloc] init];
+      _threatenedTargets = [[NSSet alloc] init];
+      _hoverAttackers = [[NSArray alloc] init];
       NSString *path = [[NSBundle mainBundle] pathForResource:@"pieces"
                                                        ofType:@"png"];
       if (!path)
@@ -43,9 +47,30 @@
 {
   return YES;
 }
+- (void)updateTrackingAreas
+{
+  [super updateTrackingAreas];
+  if (_trackingArea)
+    {
+      [self removeTrackingArea:_trackingArea];
+      [_trackingArea release];
+    }
+  _trackingArea = [[NSTrackingArea alloc]
+      initWithRect:[self bounds]
+           options:NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
+                   NSTrackingInVisibleRect
+             owner:self
+          userInfo:nil];
+  [self addTrackingArea:_trackingArea];
+}
 - (void)dealloc
 {
+  if (_trackingArea)
+    [self removeTrackingArea:_trackingArea];
+  [_trackingArea release];
   [_targets release];
+  [_threatenedTargets release];
+  [_hoverAttackers release];
   [_pieces release];
   [super dealloc];
 }
@@ -77,6 +102,65 @@
 }
 - (void)clearSelection
 {
+  _selected = -1;
+  _hoveredTarget = -1;
+  _hasRecommendedMove = NO;
+  [_targets release];
+  _targets = [[NSArray alloc] init];
+  [_threatenedTargets release];
+  _threatenedTargets = [[NSSet alloc] init];
+  [_hoverAttackers release];
+  _hoverAttackers = [[NSArray alloc] init];
+  [self setNeedsDisplay:YES];
+}
+- (NSArray *)attackersAfterMove:(GCMove)move
+{
+  ChessGame *position = [_game copy];
+  NSMutableArray *attackers = [NSMutableArray array];
+  if ([position makeMove:move])
+    {
+      NSEnumerator *enumerator = [[position legalMoves] objectEnumerator];
+      NSValue *value;
+      while ((value = [enumerator nextObject]))
+        {
+          GCMove reply = GCMoveFromValue (value);
+          if (reply.to == move.to && (reply.flags & GCCapture))
+            [attackers addObject:[NSNumber numberWithInt:reply.from]];
+        }
+    }
+  [position release];
+  return attackers;
+}
+- (void)updateTeachingMarkers
+{
+  NSMutableSet *threatened = [NSMutableSet set];
+  if (_teachingThreats)
+    {
+      NSEnumerator *enumerator = [_targets objectEnumerator];
+      NSValue *value;
+      while ((value = [enumerator nextObject]))
+        {
+          GCMove move = GCMoveFromValue (value);
+          if ([[self attackersAfterMove:move] count])
+            [threatened addObject:[NSNumber numberWithInt:move.to]];
+        }
+    }
+  [_threatenedTargets release];
+  _threatenedTargets = [threatened copy];
+}
+- (void)setTeachingThreatsEnabled:(BOOL)enabled
+{
+  _teachingThreats = enabled;
+  _hoveredTarget = -1;
+  [_hoverAttackers release];
+  _hoverAttackers = [[NSArray alloc] init];
+  [self updateTeachingMarkers];
+  [self setNeedsDisplay:YES];
+}
+- (void)showRecommendedMove:(GCMove)move
+{
+  _recommendedMove = move;
+  _hasRecommendedMove = move.from >= 0 && move.to >= 0;
   _selected = -1;
   [_targets release];
   _targets = [[NSArray alloc] init];
@@ -122,11 +206,30 @@
       NSRect q = [self rectForSquare:s];
       [(((s & 7) + (s >> 3)) & 1) ? light : dark setFill];
       NSRectFill (q);
+      if (_hasRecommendedMove
+          && (s == _recommendedMove.from || s == _recommendedMove.to))
+        {
+          NSBezierPath *recommendation =
+              [NSBezierPath bezierPathWithRect:NSInsetRect (q, 4, 4)];
+          [[NSColor colorWithCalibratedRed:.10 green:.55 blue:1.0
+                                     alpha:.95] setStroke];
+          [recommendation setLineWidth:MAX (3.0, q.size.width * .045)];
+          [recommendation stroke];
+        }
       if (s == _selected)
         {
           [[NSColor colorWithCalibratedRed:.95 green:.75 blue:.15
                                      alpha:.65] setFill];
           NSRectFillUsingOperation (q, GC_SOURCE_OVER);
+        }
+      if ([_hoverAttackers containsObject:[NSNumber numberWithInt:s]])
+        {
+          NSBezierPath *attacker =
+              [NSBezierPath bezierPathWithRect:NSInsetRect (q, 5, 5)];
+          [[NSColor colorWithCalibratedRed:1 green:.12 blue:.12 alpha:.95]
+              setStroke];
+          [attacker setLineWidth:MAX (4.0, q.size.width * .055)];
+          [attacker stroke];
         }
       NSEnumerator *targetEnumerator = [_targets objectEnumerator];
       NSValue *v;
@@ -134,8 +237,17 @@
         if (GCMoveFromValue (v).to == s)
           {
             CGFloat d = q.size.width * .22;
-            [[NSColor colorWithCalibratedRed:.15 green:.65 blue:.35
-                                       alpha:.8] setFill];
+            NSColor *marker = [_threatenedTargets
+                containsObject:[NSNumber numberWithInt:s]]
+                                  ? [NSColor colorWithCalibratedRed:.9
+                                                             green:.12
+                                                              blue:.12
+                                                             alpha:.85]
+                                  : [NSColor colorWithCalibratedRed:.15
+                                                             green:.65
+                                                              blue:.35
+                                                             alpha:.8];
+            [marker setFill];
             [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect (q, d, d)]
                 fill];
           }
@@ -177,14 +289,44 @@
     }
   for (int i = 0; i < 8; i++)
     {
+      CGFloat squareSize = [self boardRect].size.width / 8;
+      CGFloat labelInset = MAX (13.0, squareSize * .14);
       int f = _flippedBoard ? 7 - i : i, r = _flippedBoard ? i : 7 - i;
       NSRect fq = [self rectForSquare:f];
       [self drawCoordinate:[NSString stringWithFormat:@"%c", 'a' + f]
-                   atPoint:NSMakePoint (NSMaxX (fq) - 13, NSMaxY (fq) - 16)];
+                   atPoint:NSMakePoint (NSMaxX (fq) - labelInset,
+                                        NSMaxY (fq) - labelInset - 3)];
       NSRect rq = [self rectForSquare:r * 8];
       [self drawCoordinate:[NSString stringWithFormat:@"%d", r + 1]
                    atPoint:NSMakePoint (NSMinX (rq) + 3, NSMinY (rq) + 2)];
     }
+}
+- (void)mouseMoved:(NSEvent *)event
+{
+  NSInteger square = [self squareAtPoint:[self convertPoint:[event locationInWindow]
+                                                    fromView:nil]];
+  NSInteger hovered = -1;
+  GCMove hoveredMove = { -1, -1, 0, 0 };
+  NSEnumerator *enumerator = [_targets objectEnumerator];
+  NSValue *value;
+  while ((value = [enumerator nextObject]))
+    {
+      GCMove move = GCMoveFromValue (value);
+      if (move.to == square)
+        {
+          hovered = square;
+          hoveredMove = move;
+          break;
+        }
+    }
+  if (hovered == _hoveredTarget)
+    return;
+  _hoveredTarget = hovered;
+  [_hoverAttackers release];
+  _hoverAttackers = (_teachingThreats && hovered >= 0)
+                        ? [[self attackersAfterMove:hoveredMove] retain]
+                        : [[NSArray alloc] init];
+  [self setNeedsDisplay:YES];
 }
 - (void)mouseDown:(NSEvent *)event
 {
@@ -211,12 +353,14 @@
       _selected = s;
       [_targets release];
       _targets = [[_game legalMovesFrom:s] retain];
+      [self updateTeachingMarkers];
     }
   else
     {
       _selected = -1;
       [_targets release];
       _targets = [[NSArray alloc] init];
+      [self updateTeachingMarkers];
     }
   [self setNeedsDisplay:YES];
 }

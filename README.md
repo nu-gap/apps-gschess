@@ -95,6 +95,13 @@ its response, and the most recent opposing move is selected in the move history.
 - **Resign** ends the game and awards the win to the opposing color.
 - **Play Computer** toggles the AI (the opposite of the selected player color).
 - **Computer vs Computer** continuously lets the AI play both colors.
+- **Suggest Move** analyzes the current position in the background, highlights
+  the recommended source and destination squares, and describes the move.
+- **Announce Moves** speaks every completed move. It uses the native macOS speech
+  synthesizer and `espeak` when available under GNUstep.
+- **Teaching: Show Move Threats** marks legal destinations red when the moved
+  piece could be captured immediately. Hover a red destination to outline the
+  enemy pieces that could capture it.
 - **Sound Effects** toggles the White-move tick and Black-move tock sounds; the
   preference is enabled by default and saved between launches.
 - **Flip Board** changes the viewing orientation.
