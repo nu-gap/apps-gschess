@@ -655,9 +655,21 @@ moveDescription (ChessGame *game, GCMove move)
       Class speechClass = NSClassFromString (@"NSSpeechSynthesizer");
       if (speechClass)
         {
-          _speechSynthesizer = [[speechClass alloc] init];
-          if ([_speechSynthesizer respondsToSelector:@selector (setDelegate:)])
-            [_speechSynthesizer setDelegate:self];
+          NS_DURING
+            {
+              _speechSynthesizer = [[speechClass alloc] init];
+              if ([_speechSynthesizer
+                      respondsToSelector:@selector (setDelegate:)])
+                [_speechSynthesizer setDelegate:self];
+            }
+          NS_HANDLER
+            {
+              NSLog (@"Unable to initialize speech synthesizer: %@",
+                     localException);
+              [_speechSynthesizer release];
+              _speechSynthesizer = nil;
+            }
+          NS_ENDHANDLER
         }
     }
   NSString *announcement = [[_speechQueue objectAtIndex:0] retain];
@@ -665,13 +677,19 @@ moveDescription (ChessGame *game, GCMove move)
   if (_speechSynthesizer &&
       [_speechSynthesizer respondsToSelector:@selector (startSpeakingString:)])
     {
-      BOOL (*startSpeaking)(id, SEL, NSString *) =
-          (BOOL (*)(id, SEL, NSString *))
-              [_speechSynthesizer methodForSelector:
-                                      @selector (startSpeakingString:)];
-      _speechActive = YES;
-      if (!startSpeaking (_speechSynthesizer,
-                          @selector (startSpeakingString:), announcement))
+      BOOL started = NO;
+      NS_DURING
+        {
+          _speechActive = YES;
+          started = [_speechSynthesizer startSpeakingString:announcement];
+        }
+      NS_HANDLER
+        {
+          NSLog (@"Unable to speak move announcement: %@", localException);
+          started = NO;
+        }
+      NS_ENDHANDLER
+      if (!started)
         {
           _speechActive = NO;
           [self performSelector:@selector (speakNextAnnouncement)
@@ -730,10 +748,16 @@ moveDescription (ChessGame *game, GCMove move)
       [_speechQueue removeAllObjects];
       if ([_speechSynthesizer respondsToSelector:@selector (stopSpeaking)])
         {
-          void (*stopSpeaking)(id, SEL) =
-              (void (*)(id, SEL))
-                  [_speechSynthesizer methodForSelector:@selector (stopSpeaking)];
-          stopSpeaking (_speechSynthesizer, @selector (stopSpeaking));
+          NS_DURING
+            {
+              [_speechSynthesizer stopSpeaking];
+            }
+          NS_HANDLER
+            {
+              NSLog (@"Unable to stop speech synthesizer: %@",
+                     localException);
+            }
+          NS_ENDHANDLER
         }
 #if defined(GNUSTEP)
       if ([_speechTask isRunning])

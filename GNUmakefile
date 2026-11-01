@@ -6,7 +6,7 @@ include $(GNUSTEP_MAKEFILES)/common.make
 APP_NAME = GrandmasterChess
 GrandmasterChess_OBJC_FILES = main.m AppDelegate.m ChessGame.m ChessBoardView.m CapturedPiecesView.m
 GrandmasterChess_RESOURCE_FILES = Resources/pieces.png Resources/app-icon.png
-GrandmasterChess_APPLICATION_ICON = Resources/app-icon.png
+GrandmasterChess_APPLICATION_ICON = app-icon.png
 
 ADDITIONAL_OBJCFLAGS = -Wall -Wextra
 
